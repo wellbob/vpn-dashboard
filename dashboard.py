@@ -34,7 +34,7 @@ COOKIE = 'vpnd'
 SESSION_TTL = 7 * 86400
 LOGIN_MAX_FAILS = 10       # неудачных попыток входа ...
 LOGIN_WINDOW = 300         # ... за столько секунд — дальше пауза
-ACTIONS = ('rkn_on', 'rkn_off', 'rkn_update', 'ru_install', 'ru_on', 'ru_off', 'ru_update',
+ACTIONS = ('rkn_install', 'rkn_uninstall', 'rkn_on', 'rkn_off', 'rkn_update', 'ru_install', 'ru_on', 'ru_off', 'ru_update',
            'ru_check', 'ru_test', 'ru_uninstall')
 
 DEFAULT_CONFIG = {'bind': ['127.0.0.1', 'amn0'], 'port': 8080}

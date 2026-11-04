@@ -71,6 +71,7 @@ HOST_SERVICES = [
 
 # Что дашборд может попросить сделать (и ничего больше): действие -> (инструмент, аргумент)
 ACTIONS = {
+    'rkn_install': ('rkn_script', 'install'), 'rkn_uninstall': ('rkn', 'uninstall'),
     'rkn_on': ('rkn', 'on'), 'rkn_off': ('rkn', 'off'), 'rkn_update': ('rkn', 'update'),
     'ru_install': ('ru', 'install'), 'ru_on': ('ru', 'on'), 'ru_off': ('ru', 'off'),
     'ru_update': ('ru', 'update'), 'ru_check': ('ru', 'check-update'), 'ru_test': ('ru', 'test'),
@@ -78,6 +79,7 @@ ACTIONS = {
 }
 ACTION_TIMEOUT = 900       # установка sing-box через apt может занять несколько минут
 RKN_TOOLS = [('rkn-shield', '/usr/local/sbin/rkn-shield'), ('rkn-extra-block', '/usr/local/sbin/rkn-extra-block')]
+RKN_SCRIPT = '/opt/vpn-dashboard/rkn-shield.sh'   # из него защита ставится кнопкой
 RU_TOOL = '/opt/vpn-dashboard/ru-filter.sh'
 _action = {'thread': None}
 
@@ -291,7 +293,7 @@ def timer_next(unit):
 def rkn_info(st, today):
     name, path = rkn_tool()
     if not name:
-        return {'installed': False}
+        return {'installed': False, 'available': os.path.exists(RKN_SCRIPT)}
     rules = sh(['iptables-save'])
     if name == 'rkn-shield':
         conf = read_text('/etc/rkn-shield/config')
@@ -347,7 +349,10 @@ def run_action(rid, path, arg, on_done):
         r = subprocess.run([path, arg], capture_output=True, text=True, timeout=ACTION_TIMEOUT)
         text = re.sub(r'\x1b\[[0-9;]*m', '', (r.stdout + r.stderr)).strip()
         result['ok'] = r.returncode == 0
-        result['message'] = text.splitlines()[-1] if text else ('Готово' if result['ok'] else 'Ошибка')
+        lines = text.splitlines()
+        # итоговая строка «Готово…», если скрипт её напечатал, иначе последняя
+        result['message'] = (next((l for l in reversed(lines) if l.startswith('Готово')), lines[-1]) if lines
+                             else ('Готово' if result['ok'] else 'Ошибка'))
     except (OSError, subprocess.TimeoutExpired) as e:
         result['message'] = f'Не удалось выполнить: {e}'
     result['ts'] = int(time.time())
@@ -383,9 +388,17 @@ def handle_request(on_done=lambda: None):
         return fail('Сейчас выполняется другое действие — подожди, пока оно закончится')
     tool, arg = action
     if tool == 'rkn':
-        path = rkn_tool()[1]
+        name, path = rkn_tool()
         if not path:
             return fail('Защита от РКН не установлена')
+        if arg == 'uninstall' and name != 'rkn-shield':
+            return fail('Эту защиту ставила панель PRVTPRO — удаляй её там')
+    elif tool == 'rkn_script':
+        if rkn_tool()[0]:
+            return fail('Защита от РКН уже установлена')
+        path = RKN_SCRIPT
+        if not os.path.exists(path):
+            return fail('Нет файла rkn-shield.sh — обнови дашборд')
     else:
         path = RU_TOOL
         if not os.path.exists(path):

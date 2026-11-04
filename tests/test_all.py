@@ -83,6 +83,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(st['clients'], [])
         self.assertEqual(st['modules'], [])
         self.assertFalse(st['rkn']['installed'])
+        self.assertIn('available', st['rkn'])  # дашборд покажет кнопку «Установить», если скрипт на месте
         self.assertEqual(st['totals']['online'], 0)
         json.dumps(st)  # всё сериализуется
 
@@ -239,6 +240,11 @@ class CollectorTests(unittest.TestCase):
                 json.dump({'action': 'rm -rf /', 'id': 'x1', 'ts': self.clock.t}, f)
             collector.handle_request()
             self.assertFalse(json.load(open(collector.RESULT_FILE))['ok'])
+            # установить поверх уже стоящей защиты нельзя
+            with open(collector.REQUEST_FILE, 'w') as f:
+                json.dump({'action': 'rkn_install', 'id': 'x2', 'ts': self.clock.t}, f)
+            collector.handle_request()
+            self.assertIn('уже установлена', json.load(open(collector.RESULT_FILE))['message'])
             # мусор в файле не роняет сборщик
             with open(collector.REQUEST_FILE, 'w') as f:
                 f.write('not json')

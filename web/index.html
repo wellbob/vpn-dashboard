@@ -420,16 +420,25 @@ $('h-client').addEventListener('change', () => renderHistory(ST));
 let busy = false;
 function renderProtection(st) {
   const r = st.rkn || {};
-  $('nav-prot').style.display = r.installed ? '' : 'none';   // без защиты раздела просто нет
+  const dis = busy || st.action_running ? 'disabled' : '';
+  $('nav-prot').style.display = r.installed || r.available ? '' : 'none';
   if (!r.installed) {
-    $('prot').innerHTML = '';
-    if (location.hash === '#protection') location.hash = '#overview';
+    if (!r.available) { $('prot').innerHTML = ''; if (location.hash === '#protection') location.hash = '#overview'; return; }
+    $('prot').innerHTML = `<div class="card"><h2>Защита от сканеров РКН</h2>
+      <p>Подключения из ~1150 сетей РКН и госструктур будут отбрасываться на всех портах сразу — SSH, VPN, Docker
+        и даже на тех, что откроются потом. Сканеры, которые ищут VPN-серверы, не получат ответа. Дополнительно сервер
+        и клиенты VPN перестанут ходить в сети VK / OK / Max.</p>
+      <p>Обычные пользователи (МТС, Билайн, МегаФон, Ростелеком, домашний интернет) не блокируются — только сети ведомств.
+        Списки обновляются сами раз в сутки, после перезагрузки защита включается сама.</p>
+      <p class="help">Установка займёт около минуты. Выключить или удалить защиту можно здесь же в любой момент.</p>
+      <div class="row"><button class="btn primary" id="rkn-install" ${dis}>Установить защиту</button></div></div>`;
+    $('rkn-install').onclick = () => { if (confirm('Установить защиту от сканеров РКН?')) runAction('rkn_install'); };
     return;
   }
   const nxt = r.next_update ? dt(r.next_update) : '—';
   $('prot').innerHTML = `
     <div class="card" style="margin-bottom:14px"><div class="prot-head">
-      <label class="switch" style="margin:0"><input type="checkbox" id="rkn-sw" ${r.enabled ? 'checked' : ''} ${busy ? 'disabled' : ''}><span></span></label>
+      <label class="switch" style="margin:0"><input type="checkbox" id="rkn-sw" ${r.enabled ? 'checked' : ''} ${dis}><span></span></label>
       <div><div class="big">${r.enabled ? 'Защита включена' : 'Защита выключена'}</div>
         <div class="muted">${r.enabled ? 'Сканеры РКН и госструктур не видят сервер — на всех портах.' : 'Сервер сейчас открыт для сканеров РКН.'}</div></div>
     </div></div>
@@ -445,13 +454,15 @@ function renderProtection(st) {
         <span>Обновлены</span><span>${esc(r.last_update || '—')}</span>
         <span>Автообновление</span><span>${r.auto_update ? 'включено' : '<span style="color:var(--bad)">выключено</span>'}</span>
         <span>Следующее</span><span>${r.auto_update ? nxt : '—'}</span></div>
-        <div class="row"><button class="btn" id="rkn-upd" ${busy ? 'disabled' : ''}>Обновить сейчас</button></div></div>
-    </div>`;
+        <div class="row"><button class="btn" id="rkn-upd" ${dis}>Обновить сейчас</button></div></div>
+    </div>
+    ${r.tool === 'rkn-shield' ? `<div class="row"><button class="btn danger" id="rkn-del" ${dis}>Удалить защиту</button></div>` : ''}`;
   $('rkn-sw').addEventListener('change', e => {
     if (!e.target.checked && !confirm('Выключить защиту от РКН? Сервер станет виден их сканерам.')) { e.target.checked = true; return; }
     runAction(e.target.checked ? 'rkn_on' : 'rkn_off');
   });
   $('rkn-upd').addEventListener('click', () => runAction('rkn_update'));
+  if ($('rkn-del')) $('rkn-del').onclick = () => { if (confirm('Удалить защиту от РКН полностью? Сервер станет виден их сканерам.')) runAction('rkn_uninstall'); };
 }
 function renderRuFilter(st) {
   const f = st.ru_filter || {};
@@ -507,7 +518,8 @@ function renderRuFilter(st) {
   $('ru-del').onclick = () => { if (confirm('Удалить фильтр RU? Клиенты будут ходить в интернет напрямую.')) runAction('ru_uninstall'); };
 }
 
-const LABELS = {rkn_on:'Включаю защиту…', rkn_off:'Выключаю защиту…', rkn_update:'Обновляю списки…',
+const LABELS = {rkn_install:'Устанавливаю защиту — около минуты…', rkn_uninstall:'Удаляю защиту…',
+  rkn_on:'Включаю защиту…', rkn_off:'Выключаю защиту…', rkn_update:'Обновляю списки…',
   ru_install:'Ставлю sing-box и настраиваю фильтр — это займёт 1–2 минуты…', ru_on:'Включаю фильтр…', ru_off:'Выключаю фильтр…',
   ru_update:'Обновляю sing-box…', ru_check:'Проверяю обновления…', ru_test:'Проверяю работу фильтра…', ru_uninstall:'Удаляю фильтр…'};
 async function runAction(action) {
