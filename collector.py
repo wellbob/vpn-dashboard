@@ -2,9 +2,9 @@
 """Сборщик статистики для vpn-dashboard.
 
 Работает от root и в основном только ЧИТАЕТ: `awg/wg show dump` во всех контейнерах
-Amnezia, список клиентов, состояние модулей и служб, защиту от РКН.
-Единственное, что он умеет делать по просьбе дашборда, — включить, выключить или
-обновить защиту от РКН (строго из белого списка команд, см. ACTIONS).
+Amnezia, список клиентов, состояние модулей и служб, защиту от РКН и фильтр RU.
+По просьбе дашборда умеет только одно — выполнить команду rkn-shield или ru-filter
+строго из белого списка (см. ACTIONS), в фоне, по одной за раз.
 
 Результат: /var/lib/vpn-dashboard/stats.json (читает дашборд).
 """
@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 CONFIG_FILE = '/etc/vpn-dashboard/config.json'
@@ -61,7 +62,6 @@ PEER_CONTAINERS = re.compile(r'^amnezia-(awg\d*|awg-legacy|wireguard)(-\d+)?$')
 
 # Службы на самом сервере: показываем только установленные
 HOST_SERVICES = [
-    ('sing-box', 'Фильтр RU (sing-box)'),
     ('x-ui', '3x-ui'),
     ('xray', 'Xray'),
     ('nginx', 'Nginx'),
@@ -69,9 +69,17 @@ HOST_SERVICES = [
     ('docker', 'Docker'),
 ]
 
-# Что дашборд может попросить сделать (и ничего больше)
-ACTIONS = {'rkn_on': 'on', 'rkn_off': 'off', 'rkn_update': 'update'}
+# Что дашборд может попросить сделать (и ничего больше): действие -> (инструмент, аргумент)
+ACTIONS = {
+    'rkn_on': ('rkn', 'on'), 'rkn_off': ('rkn', 'off'), 'rkn_update': ('rkn', 'update'),
+    'ru_install': ('ru', 'install'), 'ru_on': ('ru', 'on'), 'ru_off': ('ru', 'off'),
+    'ru_update': ('ru', 'update'), 'ru_check': ('ru', 'check-update'), 'ru_test': ('ru', 'test'),
+    'ru_uninstall': ('ru', 'uninstall'),
+}
+ACTION_TIMEOUT = 900       # установка sing-box через apt может занять несколько минут
 RKN_TOOLS = [('rkn-shield', '/usr/local/sbin/rkn-shield'), ('rkn-extra-block', '/usr/local/sbin/rkn-extra-block')]
+RU_TOOL = '/opt/vpn-dashboard/ru-filter.sh'
+_action = {'thread': None}
 
 
 def log(msg):
@@ -318,8 +326,37 @@ def rkn_info(st, today):
     return info
 
 
-def handle_request():
-    """Выполнить просьбу дашборда (только из ACTIONS)."""
+def ru_info():
+    """Фильтр RU (ru-filter.sh + sing-box)."""
+    if not os.path.exists(RU_TOOL):
+        return {'available': False}
+    try:
+        info = json.loads(sh(['bash', RU_TOOL, 'status', '--json'], timeout=20) or '{}')
+    except ValueError:
+        info = {}
+    info['available'] = True
+    info['enabled'] = bool(info.get('installed') and info.get('state') == 'on' and info.get('active') and info.get('rules'))
+    upd = info.get('update') or {}
+    info['update_available'] = bool(upd.get('candidate') and upd.get('installed') and upd['candidate'] != upd['installed'])
+    return info
+
+
+def run_action(rid, path, arg, on_done):
+    result = {'id': rid, 'ts': int(time.time()), 'ok': False}
+    try:
+        r = subprocess.run([path, arg], capture_output=True, text=True, timeout=ACTION_TIMEOUT)
+        text = re.sub(r'\x1b\[[0-9;]*m', '', (r.stdout + r.stderr)).strip()
+        result['ok'] = r.returncode == 0
+        result['message'] = text.splitlines()[-1] if text else ('Готово' if result['ok'] else 'Ошибка')
+    except (OSError, subprocess.TimeoutExpired) as e:
+        result['message'] = f'Не удалось выполнить: {e}'
+    result['ts'] = int(time.time())
+    save_json(RESULT_FILE, result)
+    on_done()
+
+
+def handle_request(on_done=lambda: None):
+    """Принять просьбу дашборда (только из ACTIONS) и выполнить её в фоне."""
     req = load_json(REQUEST_FILE, None)
     if req is None:
         return False
@@ -332,25 +369,36 @@ def handle_request():
     rid = str(req.get('id', ''))
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', rid):
         return False
-    result = {'id': rid, 'ts': int(time.time()), 'ok': False}
-    name, path = rkn_tool()
-    arg = ACTIONS.get(req.get('action'))
+
+    def fail(message):
+        save_json(RESULT_FILE, {'id': rid, 'ts': int(time.time()), 'ok': False, 'message': message})
+        return True
+
+    action = ACTIONS.get(req.get('action'))
     if time.time() - float(req.get('ts') or 0) > 120:
-        result['message'] = 'Запрос устарел, попробуй ещё раз'
-    elif not arg:
-        result['message'] = 'Неизвестное действие'
-    elif not name:
-        result['message'] = 'Защита от РКН не установлена'
+        return fail('Запрос устарел, попробуй ещё раз')
+    if not action:
+        return fail('Неизвестное действие')
+    if _action['thread'] and _action['thread'].is_alive():
+        return fail('Сейчас выполняется другое действие — подожди, пока оно закончится')
+    tool, arg = action
+    if tool == 'rkn':
+        path = rkn_tool()[1]
+        if not path:
+            return fail('Защита от РКН не установлена')
     else:
-        try:
-            r = subprocess.run([path, arg], capture_output=True, text=True, timeout=240)
-            text = re.sub(r'\x1b\[[0-9;]*m', '', (r.stdout + r.stderr)).strip()
-            result['ok'] = r.returncode == 0
-            result['message'] = text.splitlines()[-1] if text else ('Готово' if result['ok'] else 'Ошибка')
-        except (OSError, subprocess.TimeoutExpired) as e:
-            result['message'] = f'Не удалось выполнить: {e}'
-    save_json(RESULT_FILE, result)
+        path = RU_TOOL
+        if not os.path.exists(path):
+            return fail('Нет файла ru-filter.sh — обнови дашборд')
+    _action['thread'] = threading.Thread(target=run_action, args=(rid, path, arg, on_done), daemon=True)
+    _action['thread'].start()
     return True
+
+
+def wait_actions(timeout=None):
+    """Для тестов: дождаться фонового действия."""
+    if _action['thread']:
+        _action['thread'].join(timeout)
 
 
 # ------------------------------------------------------------ сервер
@@ -433,6 +481,7 @@ def collect(cfg, state, ctx):
         ctx['services'] = host_services()
         ctx['wan'], ctx['ip'] = default_route()
         ctx['rkn'] = rkn_info(state, today)
+        ctx['ru'] = ru_info()
 
     clients, sum_down, sum_up = [], 0, 0
     for mod in ctx['modules']:
@@ -549,6 +598,8 @@ def collect(cfg, state, ctx):
         'modules': ctx['modules'],
         'services': ctx['services'],
         'rkn': ctx['rkn'],
+        'ru_filter': ctx.get('ru', {}),
+        'action_running': bool(_action['thread'] and _action['thread'].is_alive()),
         'clients': clients,
         'totals': {'clients': len(clients), 'online': sum(c['online'] for c in clients),
                    **{k: sum(c[k] for c in clients) for k in keys}},
@@ -570,12 +621,14 @@ def main():
             save_json(STATE_FILE, state, 0o600)
         except Exception as e:  # сборщик не должен падать из-за одного сбоя
             log(f'collect: {e!r}')
-        # между замерами раз в секунду проверяем, не просит ли дашборд что-то сделать
-        while time.time() - t0 < INTERVAL:
+        # между замерами раз в секунду проверяем, не просит ли дашборд что-то сделать;
+        # когда действие закончится, сразу пересобираем статус
+        def refresh_soon():
+            ctx['slow_t'] = 0
+            ctx['wake'] = True
+        while time.time() - t0 < INTERVAL and not ctx.pop('wake', False):
             try:
-                if handle_request():
-                    ctx['slow_t'] = 0
-                    break
+                handle_request(refresh_soon)
             except Exception as e:
                 log(f'request: {e!r}')
             time.sleep(1)

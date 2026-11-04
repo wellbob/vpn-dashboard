@@ -117,6 +117,7 @@
       <a href="#clients" data-p="clients"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/></svg><span>Клиенты</span></a>
       <a href="#history" data-p="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>История</span></a>
       <a href="#protection" data-p="protection" id="nav-prot" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span>Защита</span></a>
+      <a href="#rufilter" data-p="rufilter" id="nav-ru" style="display:none"><svg viewBox="0 0 24 24"><path d="M3 4.5h18l-7 8.2V19l-4 1.5v-7.8z"/></svg><span>Фильтр RU</span></a>
       <a href="#modules" data-p="modules"><svg viewBox="0 0 24 24"><path d="M12 2.8l8.5 4.7v9L12 21.2l-8.5-4.7v-9z"/><path d="M3.5 7.5L12 12l8.5-4.5M12 12v9.2"/></svg><span>Модули</span></a>
       <a href="#settings" data-p="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Настройки</span></a>
     </nav>
@@ -174,6 +175,11 @@
         </table></div>
         <p class="help">История ведётся с момента установки дашборда, хранятся последние 500 подключений.</p>
       </div>
+    </section>
+
+    <!-- ФИЛЬТР RU -->
+    <section class="page" id="p-rufilter">
+      <div id="ru"></div>
     </section>
 
     <!-- ЗАЩИТА -->
@@ -241,11 +247,11 @@ async function api(url, body) {
   if (!r.ok) throw new Error(j.error || 'Ошибка');
   return j;
 }
-function toast(text, ok = true) { const t = $('toast'); t.textContent = text; t.style.borderColor = ok ? 'var(--ok)' : 'var(--bad)';
-  t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 5000); }
+function toast(text, ok = true, sticky = false) { const t = $('toast'); t.textContent = text; t.style.borderColor = ok ? 'var(--ok)' : 'var(--bad)';
+  t.style.display = 'block'; clearTimeout(t._h); if (!sticky) t._h = setTimeout(() => t.style.display = 'none', 6000); }
 
 // ---------- навигация и тема
-const TITLES = {overview:'Обзор', clients:'Клиенты', history:'История подключений', protection:'Защита от РКН', modules:'Модули', settings:'Настройки'};
+const TITLES = {overview:'Обзор', clients:'Клиенты', history:'История подключений', protection:'Защита от РКН', rufilter:'Фильтр RU', modules:'Модули', settings:'Настройки'};
 function route() {
   const p = (location.hash || '#overview').slice(1); const page = TITLES[p] ? p : 'overview';
   document.querySelectorAll('.page').forEach(el => el.classList.toggle('on', el.id === 'p-' + page));
@@ -357,6 +363,8 @@ function statusChips(st) {
   const chips = (st.modules || []).map(m => [m.title, m.running ? 'on' : 'bad', m.running ? 'работает' : 'остановлен'])
     .concat((st.services || []).filter(s => s.running || s.enabled).map(s => [s.title, s.running ? 'on' : 'bad', s.running ? 'работает' : 'остановлен']));
   const r = st.rkn || {};
+  const f = st.ru_filter || {};
+  if (f.installed) chips.push(['Фильтр RU', f.enabled ? 'on' : f.state === 'on' ? 'bad' : 'warn', f.enabled ? 'работает' : f.state === 'on' ? 'НЕ работает' : 'выключен']);
   if (r.installed) chips.push(['Защита от РКН', r.enabled ? 'on' : 'warn', r.enabled ? 'включена' : 'выключена']);
   return chips.map(([t, c, s]) => `<span class="chip"><span class="dot ${c}"></span>${esc(t)}: ${s}</span>`).join('') || '<span class="muted">нет данных</span>';
 }
@@ -445,20 +453,77 @@ function renderProtection(st) {
   });
   $('rkn-upd').addEventListener('click', () => runAction('rkn_update'));
 }
+function renderRuFilter(st) {
+  const f = st.ru_filter || {};
+  $('nav-ru').style.display = f.available ? '' : 'none';
+  if (!f.available) { $('ru').innerHTML = ''; if (location.hash === '#rufilter') location.hash = '#overview'; return; }
+  const dis = busy || st.action_running ? 'disabled' : '';
+  if (!f.installed) {
+    $('ru').innerHTML = `<div class="card"><h2>Фильтр российских сайтов</h2>
+      <p>Весь трафик клиентов VPN пойдёт через sing-box: российские сайты (.ru, .su, .рф и база российских сервисов)
+        и российские IP-адреса будут закрыты, остальное — как обычно. Если sing-box упадёт, клиенты останутся
+        без интернета, а не пойдут мимо фильтра. Сам сервер и SSH фильтр не затрагивает.</p>
+      <p class="help">Установка займёт 1–2 минуты: поставится последняя версия sing-box из официального репозитория,
+        всё настроится и сразу проверится.</p>
+      <div class="row"><button class="btn primary" id="ru-install" ${dis}>Установить фильтр</button></div></div>`;
+    $('ru-install').onclick = () => { if (confirm('Установить sing-box и включить фильтр RU для клиентов VPN?')) runAction('ru_install'); };
+    return;
+  }
+  const u = f.update || {}, t = f.test;
+  const test = t ? `${t.google === 'ok' ? '✅ google.com открывается' : '❌ google.com не открывается'}<br>
+      ${t.ru === 'ok' ? '⚠️ ya.ru открывается' : '✅ ya.ru заблокирован'}<div class="muted small">проверено ${dt(t.ts)}</div>`
+    : '<span class="muted">ещё не проверяли</span>';
+  const why = f.enabled ? 'Российские сайты для клиентов VPN закрыты.'
+    : f.state === 'on' ? 'Включён, но sing-box не работает — клиенты сейчас без интернета. Выключи и включи заново.'
+    : 'Клиенты VPN ходят в интернет напрямую, без фильтра.';
+  $('ru').innerHTML = `
+    <div class="card" style="margin-bottom:14px"><div class="prot-head">
+      <label class="switch" style="margin:0"><input type="checkbox" id="ru-sw" ${f.state === 'on' ? 'checked' : ''} ${dis}><span></span></label>
+      <div><div class="big">${f.enabled ? 'Фильтр включён' : f.state === 'on' ? 'Фильтр не работает' : 'Фильтр выключен'}</div>
+        <div class="muted" style="${f.state === 'on' && !f.enabled ? 'color:var(--bad)' : ''}">${why}</div></div>
+    </div></div>
+    <div class="grid g3">
+      <div class="card"><h2>sing-box</h2><div class="kv">
+        <span>Установлена</span><span>${esc(f.version || '—')}</span>
+        <span>Последняя</span><span>${esc(u.candidate || '—')}</span>
+        <span>Проверено</span><span>${u.checked ? dt(u.checked) : '—'}</span></div>
+        ${f.update_available ? `<div class="row"><button class="btn primary" id="ru-upd" ${dis}>Обновить до ${esc(u.candidate)}</button></div>`
+          : `<p class="help">${u.candidate ? 'Стоит последняя версия. ' : ''}Обновления проверяются раз в сутки.</p>`}
+        <div class="row"><button class="btn" id="ru-chk" ${dis}>Проверить обновления</button></div></div>
+      <div class="card"><h2>Проверка работы</h2><div>${test}</div>
+        <div class="row"><button class="btn" id="ru-test" ${dis}>Проверить сейчас</button></div></div>
+      <div class="card"><h2>Что закрыто</h2>
+        <p class="small" style="margin:0">Домены .ru, .su, .рф, база российских сервисов (geosite-category-ru)
+          и российские IP (geoip-ru). Списки обновляются раз в сутки.</p>
+        <div class="row"><button class="btn danger" id="ru-del" ${dis}>Удалить фильтр</button></div></div>
+    </div>`;
+  $('ru-sw').onchange = e => {
+    if (!e.target.checked && !confirm('Выключить фильтр? Клиенты VPN смогут открывать российские сайты через сервер.')) { e.target.checked = true; return; }
+    runAction(e.target.checked ? 'ru_on' : 'ru_off');
+  };
+  if ($('ru-upd')) $('ru-upd').onclick = () => runAction('ru_update');
+  $('ru-chk').onclick = () => runAction('ru_check');
+  $('ru-test').onclick = () => runAction('ru_test');
+  $('ru-del').onclick = () => { if (confirm('Удалить фильтр RU? Клиенты будут ходить в интернет напрямую.')) runAction('ru_uninstall'); };
+}
+
+const LABELS = {rkn_on:'Включаю защиту…', rkn_off:'Выключаю защиту…', rkn_update:'Обновляю списки…',
+  ru_install:'Ставлю sing-box и настраиваю фильтр — это займёт 1–2 минуты…', ru_on:'Включаю фильтр…', ru_off:'Выключаю фильтр…',
+  ru_update:'Обновляю sing-box…', ru_check:'Проверяю обновления…', ru_test:'Проверяю работу фильтра…', ru_uninstall:'Удаляю фильтр…'};
 async function runAction(action) {
-  busy = true; renderProtection(ST);
-  const labels = {rkn_on:'Включаю защиту…', rkn_off:'Выключаю защиту…', rkn_update:'Обновляю списки…'};
-  toast(labels[action]);
+  busy = true; renderProtection(ST); renderRuFilter(ST);
+  toast(LABELS[action], true, true);
   try {
     const {id} = await api('/api/action', {action});
-    for (let i = 0; i < 240; i++) {
+    for (let i = 0; i < 900; i++) {
       await new Promise(r => setTimeout(r, 1000));
       const res = await api('/api/action?id=' + id);
       if (!res.pending) { toast(res.message || (res.ok ? 'Готово' : 'Ошибка'), res.ok); break; }
-      if (i === 239) toast('Сервер не ответил. Проверь, что работает vpn-dashboard-collector.', false);
+      if (i === 899) toast('Сервер не ответил. Проверь, что работает vpn-dashboard-collector.', false);
     }
   } catch (e) { toast(e.message, false); }
   busy = false; await refresh();
+  setTimeout(refresh, 4000);   // сборщик пересобирает статус пару секунд после действия
 }
 
 function renderModules(st) {
@@ -470,6 +535,9 @@ function renderModules(st) {
   const svc = (st.services || []).map(s => `<div class="mod"><b><span class="dot ${s.running ? 'on' : s.enabled ? 'bad' : ''}"></span>${esc(s.title)}</b>
     <div class="muted small" style="margin-top:4px">${s.running ? 'работает' : s.enabled ? 'остановлена' : 'выключена'} · <code>${esc(s.unit)}</code></div></div>`);
   const r = st.rkn || {};
+  const f = st.ru_filter || {};
+  if (f.installed) svc.push(`<div class="mod"><b><span class="dot ${f.enabled ? 'on' : f.state === 'on' ? 'bad' : 'warn'}"></span>Фильтр RU</b>
+    <div class="muted small" style="margin-top:4px">${f.enabled ? 'работает' : f.state === 'on' ? 'не работает' : 'выключен'} · sing-box ${esc(f.version || '')}</div></div>`);
   if (r.installed) svc.push(`<div class="mod"><b><span class="dot ${r.enabled ? 'on' : 'warn'}"></span>Защита от РКН</b>
     <div class="muted small" style="margin-top:4px">${r.enabled ? 'включена' : 'выключена'} · <code>${esc(r.tool)}</code></div></div>`);
   $('m-host').innerHTML = svc.join('');
@@ -481,7 +549,7 @@ function render(st) {
   const age = Date.now() / 1000 - (st.updated || 0);
   $('updated').textContent = st.updated ? 'обновлено ' + hm(st.updated) : 'нет данных';
   $('live').style.background = age < 60 ? 'var(--ok)' : 'var(--bad)';
-  renderOverview(st); renderClients(st); renderHistory(st); renderProtection(st); renderModules(st);
+  renderOverview(st); renderClients(st); renderHistory(st); renderProtection(st); renderRuFilter(st); renderModules(st);
 }
 async function refresh() { try { render(await api('/api/stats')); } catch (e) { $('updated').textContent = 'нет связи с сервером'; $('live').style.background = 'var(--bad)'; } }
 

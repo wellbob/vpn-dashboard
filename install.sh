@@ -7,7 +7,9 @@
 #   bash install.sh check           проверить, что всё работает
 #   bash install.sh reset-password  сбросить вход в дашборд на admin / admin
 #   bash install.sh uninstall       удалить дашборд (защита, если стоит, остаётся)
-#   bash install.sh uninstall --all удалить и дашборд, и защиту
+#   bash install.sh uninstall --all удалить и дашборд, и защиту, и фильтр RU
+#
+# Фильтр российских сайтов (sing-box) ставится кнопкой в дашборде или: bash ru-filter.sh install
 set -euo pipefail
 
 APP=/opt/vpn-dashboard
@@ -28,6 +30,7 @@ vpn_ip() { ip -4 -o addr show "$VPN_IF" 2>/dev/null | awk '{print $4}' | cut -d/
 
 cmd_uninstall() {
     if [ "$ALL" = 1 ] && [ -x /usr/local/sbin/rkn-shield ]; then /usr/local/sbin/rkn-shield uninstall; fi
+    if [ "$ALL" = 1 ] && [ -x /usr/local/sbin/ru-filter ]; then /usr/local/sbin/ru-filter uninstall; fi
     systemctl disable --now vpn-dashboard vpn-dashboard-collector 2>/dev/null || true
     rm -f /etc/systemd/system/vpn-dashboard.service /etc/systemd/system/vpn-dashboard-collector.service
     systemctl daemon-reload
@@ -59,6 +62,11 @@ cmd_check() {
     if [ -x /usr/local/sbin/rkn-shield ]; then
         if [ "$(cat /etc/rkn-shield/state 2>/dev/null)" = on ]; then ok "защита от РКН включена"; else warn "защита от РКН установлена, но выключена"; fi
     elif [ -x /usr/local/sbin/rkn-extra-block ]; then ok "защита от РКН: плагин панели PRVTPRO"
+    fi
+    if [ -f /etc/ru-filter/config.json ]; then
+        if [ "$(cat /etc/ru-filter/state 2>/dev/null)" != on ]; then warn "фильтр RU установлен, но выключен"
+        elif systemctl is-active --quiet ru-filter; then ok "фильтр RU работает (sing-box $(sing-box version 2>/dev/null | awk 'NR==1{print $3}'))"
+        else fail "фильтр RU включён, но sing-box не работает: journalctl -u ru-filter -n 30"; bad=1; fi
     fi
     return $bad
 }
@@ -102,7 +110,7 @@ esac
 
 echo "Устанавливаю vpn-dashboard..."
 command -v systemctl >/dev/null || die "нужен systemd"
-for f in collector.py dashboard.py rkn-shield.sh web/index.html web/login.html; do
+for f in collector.py dashboard.py rkn-shield.sh ru-filter.sh web/index.html web/login.html; do
     [ -f "$SRC/$f" ] || die "нет файла $f — запускай install.sh из папки vpn-dashboard целиком"
 done
 if ! command -v python3 >/dev/null; then
@@ -117,7 +125,9 @@ id vpndash >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbi
 install -d -m 755 "$APP" "$APP/web" "$CONF" "$DATA"
 install -d -m 700 -o vpndash -g vpndash "$DATA/web"
 if [ "$SRC" != "$APP" ]; then
-    install -m 755 "$SRC/collector.py" "$SRC/dashboard.py" "$SRC/install.sh" "$SRC/rkn-shield.sh" "$APP/"
+    install -m 755 "$SRC/collector.py" "$SRC/dashboard.py" "$SRC/install.sh" "$SRC/rkn-shield.sh" "$SRC/ru-filter.sh" "$APP/"
+    # уже стоящий фильтр обновляем до новой версии скрипта
+    [ -x /usr/local/sbin/ru-filter ] && install -m 755 "$SRC/ru-filter.sh" /usr/local/sbin/ru-filter
     install -m 644 "$SRC/web/index.html" "$SRC/web/login.html" "$APP/web/"
 fi
 

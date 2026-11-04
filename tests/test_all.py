@@ -95,8 +95,9 @@ class CollectorTests(unittest.TestCase):
             'amnezia-dns\texited\tExited (0)\t\n'
             'amnezia_panel\trunning\tUp\t127.0.0.1:5000->5000/tcp\n'
             'nginx-other\trunning\tUp\t0.0.0.0:80->80/tcp\n')
-        self.fake.answers['systemctl list-unit-files'] = 'sing-box.service enabled enabled\nssh.service enabled enabled\n'
-        self.fake.answers['systemctl is-active sing-box'] = 'active\n'
+        self.fake.answers['systemctl list-unit-files'] = 'fail2ban.service enabled enabled\nssh.service enabled enabled\n'
+        self.fake.answers['systemctl is-active fail2ban'] = 'active\n'
+        self.fake.answers['systemctl is-enabled fail2ban'] = 'enabled\n'
         t0 = self.clock.t
         awg = {'peers': [('A', '10.8.1.1', '1.2.3.4', t0 - 30, 1000, 5000)]}
         self.fake.answers['docker exec amnezia-awg '] = lambda: peer_output(awg['peers'], {'A': 'Телефон'})
@@ -111,7 +112,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(titles['amnezia_panel'], 'Панель PRVTPRO')
         self.assertNotIn('nginx-other', titles)
         self.assertEqual([m['ports'] for m in st['modules'] if m['container'] == 'amnezia-wireguard'][0], ['51821/udp'])
-        self.assertEqual([s['title'] for s in st['services']], ['Фильтр RU (sing-box)'])
+        self.assertEqual([(s['title'], s['running'], s['enabled']) for s in st['services']], [('Fail2ban', True, True)])
         names = {c['name']: c for c in st['clients']}
         self.assertTrue(names['Телефон']['online'])
         self.assertEqual(names['Телефон']['module'], 'AmneziaWG')
@@ -225,7 +226,10 @@ class CollectorTests(unittest.TestCase):
             # просьба дашборда выключить защиту
             with open(collector.REQUEST_FILE, 'w') as f:
                 json.dump({'action': 'rkn_off', 'id': 'abc123', 'ts': self.clock.t}, f)
-            self.assertTrue(collector.handle_request())
+            done = []
+            self.assertTrue(collector.handle_request(lambda: done.append(1)))
+            collector.wait_actions(10)
+            self.assertEqual(done, [1])  # сборщик узнаёт, что действие закончилось
             res = json.load(open(collector.RESULT_FILE))
             self.assertTrue(res['ok'])
             self.assertEqual(res['message'], 'Защита: off')
@@ -241,6 +245,43 @@ class CollectorTests(unittest.TestCase):
             collector.handle_request()
         finally:
             collector.read_text = orig_read
+
+    def test_ru_filter_status_and_actions(self):
+        orig = collector.RU_TOOL
+        try:
+            collector.RU_TOOL = os.path.join(self.tmp, 'nope.sh')
+            self.assertEqual(collector.ru_info(), {'available': False})
+            tool = collector.RU_TOOL = os.path.join(self.tmp, 'ru-filter.sh')
+            with open(tool, 'w') as f:
+                f.write('#!/bin/sh\n'
+                        'case "$1" in\n'
+                        '  status) echo \'{"installed":true,"state":"on","active":true,"rules":true,"version":"1.14.4",'
+                        '"update":{"installed":"1.14.4","candidate":"1.14.5","checked":1},"test":null}\' ;;\n'
+                        '  install) sleep 1; echo "Ставлю..."; echo "Готово! фильтр включён" ;;\n'
+                        '  *) echo "сделано: $1" ;;\n'
+                        'esac\n')
+            os.chmod(tool, 0o755)
+            collector.sh = self.orig[0]          # здесь нужен настоящий запуск скрипта
+            info = collector.ru_info()
+            self.assertTrue(info['enabled'])
+            self.assertTrue(info['update_available'])
+            self.assertEqual(info['version'], '1.14.4')
+            # долгая установка идёт в фоне, вторая просьба в это время получает отказ
+            with open(collector.REQUEST_FILE, 'w') as f:
+                json.dump({'action': 'ru_install', 'id': 'r1', 'ts': self.clock.t}, f)
+            collector.handle_request()
+            with open(collector.REQUEST_FILE, 'w') as f:
+                json.dump({'action': 'ru_off', 'id': 'r2', 'ts': self.clock.t}, f)
+            collector.handle_request()
+            busy = json.load(open(collector.RESULT_FILE))
+            self.assertEqual(busy['id'], 'r2')
+            self.assertFalse(busy['ok'])
+            collector.wait_actions(10)
+            res = json.load(open(collector.RESULT_FILE))
+            self.assertEqual((res['id'], res['ok'], res['message']), ('r1', True, 'Готово! фильтр включён'))
+        finally:
+            collector.RU_TOOL = orig
+            collector.sh = self.fake
 
 
 class DashboardTests(unittest.TestCase):

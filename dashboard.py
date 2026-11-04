@@ -34,7 +34,8 @@ COOKIE = 'vpnd'
 SESSION_TTL = 7 * 86400
 LOGIN_MAX_FAILS = 10       # неудачных попыток входа ...
 LOGIN_WINDOW = 300         # ... за столько секунд — дальше пауза
-ACTIONS = ('rkn_on', 'rkn_off', 'rkn_update')
+ACTIONS = ('rkn_on', 'rkn_off', 'rkn_update', 'ru_install', 'ru_on', 'ru_off', 'ru_update',
+           'ru_check', 'ru_test', 'ru_uninstall')
 
 DEFAULT_CONFIG = {'bind': ['127.0.0.1', 'amn0'], 'port': 8080}
 
@@ -169,6 +170,10 @@ def status_lines(st):
     for s in st.get('services', []):
         if s['running'] or s.get('enabled'):   # намеренно выключенные службы не показываем
             lines.append(f"{'✅' if s['running'] else '❌'} {esc(s['title'])}")
+    ru = st.get('ru_filter') or {}
+    if ru.get('installed'):
+        lines.append(f"{'✅' if ru.get('enabled') else '⚠️'} Фильтр RU (sing-box {esc(ru.get('version', ''))})"
+                     f"{'' if ru.get('enabled') else ' — выключен'}")
     rkn = st.get('rkn') or {}
     if rkn.get('installed'):
         lines.append(f"{'✅' if rkn.get('enabled') else '⚠️'} Защита от РКН"
