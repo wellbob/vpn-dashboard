@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# vpn-dashboard: дашборд VPN-сервера на Amnezia (веб + Telegram-бот) и защита от РКН (rkn-shield).
+# vpn-dashboard: дашборд VPN-сервера на Amnezia (веб + Telegram-бот).
 #
-#   bash install.sh                 установить или обновить всё (запускать из папки с файлами)
-#   bash install.sh --no-rkn        то же, но без защиты от РКН
+#   bash install.sh                 установить или обновить дашборд (запускать из папки с файлами)
+#   bash install.sh --rkn           то же + защита от сканеров РКН (rkn-shield.sh);
+#                                   если защита уже стоит, она обновляется и без флага
 #   bash install.sh check           проверить, что всё работает
 #   bash install.sh reset-password  сбросить вход в дашборд на admin / admin
-#   bash install.sh uninstall       удалить дашборд (защита от РКН остаётся)
-#   bash install.sh uninstall --all удалить и дашборд, и защиту от РКН
+#   bash install.sh uninstall       удалить дашборд (защита, если стоит, остаётся)
+#   bash install.sh uninstall --all удалить и дашборд, и защиту
 set -euo pipefail
 
 APP=/opt/vpn-dashboard
@@ -58,7 +59,7 @@ cmd_check() {
     if [ -x /usr/local/sbin/rkn-shield ]; then
         if [ "$(cat /etc/rkn-shield/state 2>/dev/null)" = on ]; then ok "защита от РКН включена"; else warn "защита от РКН установлена, но выключена"; fi
     elif [ -x /usr/local/sbin/rkn-extra-block ]; then ok "защита от РКН: плагин панели PRVTPRO"
-    else warn "защита от РКН не установлена: bash $APP/rkn-shield.sh install"; fi
+    fi
     return $bad
 }
 
@@ -77,15 +78,18 @@ install_rkn() {
     fi
 }
 
-CMD=install; NO_RKN=0; ALL=0
+CMD=install; RKN=0; ALL=0
 for a in "$@"; do
     case "$a" in
         install|check|reset-password|uninstall) CMD=$a ;;
-        --no-rkn) NO_RKN=1 ;;
+        --rkn) RKN=1 ;;
+        --no-rkn) ;;   # старый флаг: теперь защита и так не ставится без --rkn
         --all) ALL=1 ;;
-        *) die "неизвестный параметр: $a (install | check | reset-password | uninstall | --no-rkn | --all)" ;;
+        *) die "неизвестный параметр: $a (install | check | reset-password | uninstall | --rkn | --all)" ;;
     esac
 done
+# уже стоящую защиту обновляем и без флага, чтобы версии не расходились
+[ -x /usr/local/sbin/rkn-shield ] && RKN=1
 
 case "$CMD" in
     uninstall) cmd_uninstall; exit 0 ;;
@@ -190,7 +194,7 @@ if command -v ufw >/dev/null && ufw status | grep -q 'Status: active'; then
     ufw allow in on $VPN_IF to any port $PORT proto tcp comment 'vpn-dashboard (only from VPN)' >/dev/null
 fi
 
-[ "$NO_RKN" = 1 ] || install_rkn
+[ "$RKN" = 1 ] && install_rkn
 
 systemctl daemon-reload
 systemctl enable vpn-dashboard-collector vpn-dashboard >/dev/null 2>&1

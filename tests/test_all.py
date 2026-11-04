@@ -316,6 +316,13 @@ class DashboardTests(unittest.TestCase):
             self.assertNotIn('<i>', text)
             fn({})                             # пустая статистика не роняет бота
 
+    def test_protection_hidden_without_rkn(self):
+        flat = lambda kb: [b['text'] for row in kb['keyboard'] for b in row]
+        self.assertNotIn('🛡 Защита', flat(dashboard.keyboard({})))
+        self.assertNotIn('🛡 Защита', flat(dashboard.keyboard({'rkn': {'installed': False}})))
+        self.assertIn('🛡 Защита', flat(dashboard.keyboard({'rkn': {'installed': True}})))
+        self.assertNotIn('РКН', dashboard.status_lines({'rkn': {'installed': False}, 'modules': [], 'services': []}))
+
     def test_resolve(self):
         self.assertEqual(dashboard.resolve('127.0.0.1'), '127.0.0.1')
         self.assertIsNone(dashboard.resolve('no-such-iface0'))

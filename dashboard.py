@@ -132,10 +132,17 @@ def esc(s):
 
 # ------------------------------------------------------------ Telegram-бот
 
-KEYBOARD = {'keyboard': [[{'text': '📊 Сводка'}, {'text': '👥 Клиенты'}],
-                         [{'text': '📜 История'}, {'text': '🛡 Защита'}, {'text': '🖥 Сервер'}]],
-            'resize_keyboard': True}
 bot_status = {'ok': False, 'text': 'не настроен'}
+
+
+def rkn_installed(st):
+    return bool((st.get('rkn') or {}).get('installed'))
+
+
+def keyboard(st):
+    """Кнопка «Защита» — только если защита установлена на сервере."""
+    row2 = [{'text': '📜 История'}] + ([{'text': '🛡 Защита'}] if rkn_installed(st) else []) + [{'text': '🖥 Сервер'}]
+    return {'keyboard': [[{'text': '📊 Сводка'}, {'text': '👥 Клиенты'}], row2], 'resize_keyboard': True}
 
 
 def tg_api(token, method, params=None, timeout=35):
@@ -249,8 +256,9 @@ def tg_handle(token, msg, allowed, denied_recently):
         return
     st = load_json(STATS_FILE, {})
     routes = [(('/clients', 'Клиенты'), tg_clients), (('/history', 'История'), tg_history),
-              (('/protection', 'Защита'), tg_protection), (('/server', 'Сервер'), tg_server),
-              (('/stats', 'Сводка'), tg_summary)]
+              (('/server', 'Сервер'), tg_server), (('/stats', 'Сводка'), tg_summary)]
+    if rkn_installed(st):
+        routes.insert(2, (('/protection', 'Защита'), tg_protection))
     for (cmd, word), fn in routes:
         if text.startswith(cmd) or word in text:
             reply = fn(st)
@@ -260,10 +268,10 @@ def tg_handle(token, msg, allowed, denied_recently):
                  '📊 Сводка — онлайн, скорость, трафик, состояние\n'
                  '👥 Клиенты — кто онлайн и сколько скачал\n'
                  '📜 История — последние подключения\n'
-                 '🛡 Защита — защита от РКН\n'
+                 + ('🛡 Защита — защита от РКН\n' if rkn_installed(st) else '') +
                  '🖥 Сервер — нагрузка, память, пинг')
     tg_api(token, 'sendMessage', {'chat_id': chat, 'text': reply, 'parse_mode': 'HTML',
-                                  'reply_markup': KEYBOARD})
+                                  'reply_markup': keyboard(st)})
 
 
 def bot_loop():
@@ -470,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
         for i in ids:
             try:
                 tg_api(token, 'sendMessage', {'chat_id': i, 'text': '✅ Проверка: бот дашборда VPN работает.',
-                                              'reply_markup': KEYBOARD}, timeout=10)
+                                              'reply_markup': keyboard(load_json(STATS_FILE, {}))}, timeout=10)
                 results.append({'id': i, 'ok': True})
             except Exception as e:
                 hint = ' — сначала напиши боту /start' if 'chat not found' in str(e).lower() else ''
